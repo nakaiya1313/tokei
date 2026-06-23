@@ -51,6 +51,7 @@
     box-shadow:0 6px 0 #c97a00;background:var(--btn);
   }
   .bigbtn.read{background:var(--btn2);box-shadow:0 6px 0 #1f9e44;}
+  .bigbtn.touch{background:var(--min);box-shadow:0 6px 0 #1a4ea8;}
   .bigbtn:active{transform:translateY(3px);box-shadow:0 3px 0 #c97a00;}
 
   /* ---- ゲーム共通バー ---- */
@@ -108,6 +109,7 @@
     <div class="segnote" id="behaviorNote">たんしん（みじかいはり）は すうじの ばしょに とまります</div>
     <button class="bigbtn" id="startSet">▶ とけいを あわせる</button>
     <button class="bigbtn read" id="startRead">▶ とけいを よむ</button>
+    <button class="bigbtn touch" id="startTouch">▶ とけいを さわる</button>
     <div id="ad">こうこく（ここに injectAd）</div>
   </div>
 
@@ -136,6 +138,11 @@
     <div class="prompt"><span>とけいを よんでね　<small>なんじ かな？</small></span></div>
   </div>
 
+  <!-- ======== さわるモード ======== -->
+  <div id="touchArea" class="hide" style="display:flex;flex-direction:column;align-items:center;">
+    <div class="prompt"><span id="touchTime">いま －</span><button class="spk" id="repeatTouch">🔊</button></div>
+  </div>
+
   <!-- 時計（両モード共用） -->
   <div class="clockwrap" id="clockwrap">
     <svg id="clock" viewBox="0 0 400 400" aria-label="アナログどけい">
@@ -162,13 +169,13 @@
   <!-- あわせる：操作ボタン -->
   <div id="setControls" class="controls hide">
     <button class="btn" id="check">こたえあわせ</button>
-    <button class="btn next hide" id="nextS">つぎへ ▶</button>
+    <button class="btn next" id="nextS">つぎへ ▶</button>
   </div>
 
   <!-- よむ：選択肢 -->
   <div id="opts" class="hide"></div>
   <div id="readControls" class="controls hide">
-    <button class="btn next hide" id="nextR">つぎへ ▶</button>
+    <button class="btn next" id="nextR">つぎへ ▶</button>
   </div>
 
   <div class="stars hide" id="stars"></div>
@@ -249,9 +256,10 @@ function randTime(){
 function newProblem(){
   if(state.screen==='set') newSet();
   else if(state.screen==='read') newRead();
+  else if(state.screen==='touch') newTouch();
 }
 function newSet(){
-  solved=false;$('nextS').classList.add('hide');$('check').disabled=false;
+  solved=false;$('check').disabled=false;
   target=randTime();
   do{cur=randTime();}while(cur.h===target.h&&cur.m===target.m);
   prevM=cur.m;
@@ -260,10 +268,17 @@ function newSet(){
   if(state.voice) speak('とけいを '+speakStr(target.h,target.m)+' に あわせてね');
 }
 function newRead(){
-  readDone=false;$('nextR').classList.add('hide');
+  readDone=false;
   target=randTime();cur={...target};render(cur);
   buildOptions();
   if(state.voice) speak('なんじ かな？');
+}
+function newTouch(){
+  cur=randTime();prevM=cur.m;render(cur);updateTouchReadout();
+  if(state.voice) speak('はりを うごかしてね');
+}
+function updateTouchReadout(){
+  $('touchTime').textContent='いま '+jp(cur.h,cur.m);
 }
 function buildOptions(){
   const set=new Set([target.h+'_'+target.m]);const opts=[{...target}];let guard=0;
@@ -301,15 +316,16 @@ function pAngle(ev){
   let d=Math.atan2(px-CX,-(py-CY))*180/Math.PI;return d<0?d+360:d;
 }
 function angDist(a,b){let d=Math.abs(a-b)%360;return d>180?360-d:d;}
+function canDrag(){return state.screen==='set'||state.screen==='touch';}
 function start(ev){
-  if(state.screen!=='set'||solved)return;
+  if(!canDrag()||solved)return;
   const deg=pAngle(ev);
   const minDeg=cur.m*6, hourDeg=(cur.h%12)*30+(state.behavior==='real'?cur.m*0.5:0);
   active=(angDist(deg,hourDeg)-6<angDist(deg,minDeg))?'hour':'min';
   prevM=cur.m;clockEl.setPointerCapture(ev.pointerId);move(ev);ev.preventDefault();
 }
 function move(ev){
-  if(!active||state.screen!=='set')return;
+  if(!active||!canDrag())return;
   const deg=pAngle(ev);
   if(active==='min'){
     let m=(Math.round(Math.round(deg/6)/lvl().g)*lvl().g)%60;
@@ -322,9 +338,14 @@ function move(ev){
   }else{
     cur.h=Math.round(deg/30)%12;
   }
-  render(cur);ev.preventDefault();
+  render(cur);
+  if(state.screen==='touch') updateTouchReadout();
+  ev.preventDefault();
 }
-function end(){active=null;}
+function end(){
+  if(active&&state.screen==='touch'){ensureCtx();if(state.voice) speak(speakStr(cur.h,cur.m));}
+  active=null;
+}
 clockEl.addEventListener('pointerdown',start);
 clockEl.addEventListener('pointermove',move);
 clockEl.addEventListener('pointerup',end);
@@ -344,9 +365,11 @@ $('check').onclick=()=>{
 $('nextS').onclick=newProblem;
 $('nextR').onclick=newProblem;
 $('repeatSet').onclick=()=>{ensureCtx();speak('とけいを '+speakStr(target.h,target.m)+' に あわせてね');};
+$('repeatTouch').onclick=()=>{ensureCtx();speak(speakStr(cur.h,cur.m));};
 
 /* ===== がめん きりかえ ===== */
 function show(el,on){el.classList.toggle('hide',!on);}
+const adDone={home:false,top:false};
 function go(screen){
   state.screen=screen;
   show(document.querySelector('h1'),screen==='home');
@@ -355,19 +378,40 @@ function go(screen){
   show($('gamebar'),screen!=='home');
   show($('setArea'),screen==='set');
   show($('readArea'),screen==='read');
+  show($('touchArea'),screen==='touch');
   show($('clockwrap'),screen!=='home');
   show($('setControls'),screen==='set');
   show($('opts'),screen==='read');
   show($('readControls'),screen==='read');
-  show($('stars'),screen!=='home');
-  $('minHand').style.pointerEvents=screen==='set'?'auto':'none';
-  $('hourHand').style.pointerEvents=screen==='set'?'auto':'none';
-  $('modeTitle').textContent = screen==='set'?'あわせる':'よむ';
+  show($('stars'),screen==='set'||screen==='read');
+  const drag=(screen==='set'||screen==='touch')?'auto':'none';
+  $('minHand').style.pointerEvents=drag;
+  $('hourHand').style.pointerEvents=drag;
+  $('modeTitle').textContent = screen==='set'?'あわせる':screen==='read'?'よむ':'さわる';
+  // こうこく（はじめて ひょうじ された ときだけ よみこむ）
+  if(screen==='home'&&!adDone.home){adDone.home=true;injectAd('ad','https://adm.shinobi.jp/s/ee41537d1735537f4937373bcb4f7742',260);}
+  if(screen!=='home'&&!adDone.top){adDone.top=true;injectAd('adTop','https://adm.shinobi.jp/s/418bfde711f9e27c930019a0fc23979d',54);}
   if(screen!=='home') newProblem();
 }
 $('startSet').onclick=()=>go('set');
 $('startRead').onclick=()=>go('read');
+$('startTouch').onclick=()=>go('touch');
 $('homeBtn').onclick=()=>{speechSynthesis&&speechSynthesis.cancel();go('home');};
+
+/* ===== こうこく（忍者AdMax を iframe に かきこむ） ===== */
+function injectAd(slotId,src,h){
+  const slot=$(slotId);if(!slot)return;
+  try{
+    const ifr=document.createElement('iframe');
+    ifr.setAttribute('frameborder','0');ifr.setAttribute('scrolling','no');
+    ifr.style.border='0';ifr.style.width='100%';ifr.style.height=h+'px';ifr.style.display='block';
+    slot.innerHTML='';slot.appendChild(ifr);
+    const doc=ifr.contentWindow.document;
+    doc.open();
+    doc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;overflow:hidden;background:transparent;text-align:center;}</style></head><body><!-- admax --><script src="'+src+'"><\/script><!-- admax --></body></html>');
+    doc.close();
+  }catch(e){}
+}
 
 /* ===== せってい ===== */
 $('behavior').querySelectorAll('button').forEach(b=>{
